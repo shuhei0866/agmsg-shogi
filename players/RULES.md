@@ -1,27 +1,35 @@
 # 対局ルール — agmsg-shogi プレイヤー手番ループ
 
-あなたは 2 つの Claude Code のうちの一方で、もう一方の Claude と将棋を 1 局指す。
-盤面の管理とルール判定は `board.py`(python-shogi のラッパー)に任せ、あなたは
-**指し手を考えることだけ**に集中する。手のやり取りは agmsg(エージェント間
-メッセージング)で行う。
+あなたは 2 つの CLI エージェント(Claude Code / Codex / Gemini CLI のいずれか)の
+一方で、もう一方のエージェントと将棋を 1 局指す。盤面の管理とルール判定は
+`board.py`(python-shogi のラッパー)に任せ、あなたは**指し手を考えることだけ**に
+集中する。手のやり取りは agmsg(エージェント間メッセージング)の共有 SQLite を介して
+行う。どのエージェントでも同じ手順で指せるよう、agmsg は**スキルではなくスクリプトを
+直接叩く**。
 
 ## 前提
 
-- あなたの役割(先手 sente / 後手 gote)は、起動時に読んだ `sente.md` か `gote.md`
-  で指定される。以下それを `<role>` と書く。
+- あなたの役割(先手 sente / 後手 gote)・相手・エージェント種別は、起動時に読む
+  `sente.md` か `gote.md` で指定される。以下、自分を `<role>`、相手を `<opp>`、
+  自分のエージェント種別(claude-code / codex / gemini)を `<type>` と書く。
 - 盤面エンジン。どのディレクトリからでも動く。以下これを `BOARD` と呼ぶ:
 
   ```
   ~/Developer/agmsg-shogi/.venv/bin/python ~/Developer/agmsg-shogi/board.py
   ```
 
-  **重要**: `python3 board.py` のようにシステムの python では動かない(python-shogi は
-  この venv にだけ入っている)。必ず上記の `BOARD`(venv の python のフルパス)を使う。
-  board.py のサブコマンドは `new` / `show` / `legal` / `apply` / `status` の 5 つだけで、
-  `whoami` や `board.json` は存在しない(`whoami` は agmsg 側のスクリプトと混同しやすい)。
+  **重要**: `python3 board.py` では動かない(python-shogi はこの venv にだけ入っている)。
+  必ず上記の `BOARD`(venv の python のフルパス)を使う。サブコマンドは
+  `new` / `show` / `legal` / `apply` / `status` の 5 つだけ。
 
-- あなたは agmsg の team `shogi` に役割名(sente または gote)で join 済みで、
-  delivery mode は monitor。相手の手は monitor で自動的に届く。
+- agmsg は次のスクリプトを直接叩く(team 名は `shogi`)。`/agmsg` や `$agmsg` の
+  スキルは使わない(エージェントによって有無が違うため):
+
+  ```
+  join : ~/.agents/skills/agmsg/scripts/join.sh shogi <role> <type> ~/Developer/agmsg-shogi
+  送信 : ~/.agents/skills/agmsg/scripts/send.sh  shogi <role> <opp> "<メッセージ>"
+  受信 : ~/.agents/skills/agmsg/scripts/inbox.sh shogi <role>
+  ```
 
 ## 通信フォーマット
 
@@ -29,9 +37,7 @@
 
 - 先頭の空白までが**指し手の USI**。例: 通常の手 `7g7f`、駒を打つ手 `P*5e`、
   成る手 `8h2b+`。
-- 残りは自由コメント(読み筋・方針・挨拶・軽口、日本語でよい)。観賞用であって
-  盤面には影響しない。
-- 例: `7g7f 居飛車でいきます`
+- 残りは自由コメント(読み筋・方針・挨拶、日本語でよい)。観賞用で盤面には影響しない。
 
 受け取ったメッセージからは、先頭トークンだけを USI として取り出して使う。
 
@@ -39,35 +45,34 @@
 
 ### A. 相手の手を受け取る(先手の初手だけはこの A を飛ばす)
 
-- monitor で届いたメッセージの先頭トークンを、相手の USI として取り出す。
-- 自分の盤面に適用する: `BOARD apply --player <role> <相手の USI>`
-- もし `ILLEGAL` が返ったら、相手が反則手を送ったか盤面がずれている。相手にその旨を
-  伝えて対局を止め、ユーザーに報告する。
+- `inbox.sh shogi <role>` を実行して相手のメッセージを読む。
+- まだ届いていなければ(空なら)数秒おきに `inbox.sh` を繰り返し、相手の手が来るまで待つ。
+- 届いたメッセージの先頭トークンを相手の USI として、盤面に適用する:
+  `BOARD apply --player <role> <相手の USI>`
+- `ILLEGAL` が返ったら、相手が反則したか盤面がずれている。相手に伝えて対局を止め、
+  ユーザーに報告する。
 
 ### B. 局面を確認する
 
-- `BOARD show --player <role>` で盤面を見る。
-- `BOARD status --player <role>` で手番・王手・詰みを確認する。
-- もし `checkmate=True` で**手番が自分**なら、あなたは詰まされている。投了する:
-  `/agmsg send <相手の role> "投了 — お見事でした"` を送り、対局を終えてユーザーに結果を報告する。
+- `BOARD show --player <role>` で盤面、`BOARD status --player <role>` で手番・王手・詰み。
+- `checkmate=True` で**手番が自分**なら詰まされている。投了する:
+  `send.sh shogi <role> <opp> "投了 — お見事でした"` を送り、対局を終えて報告する。
 
 ### C. 自分の手を選ぶ
 
 - `BOARD legal --player <role>` で合法手(USI)を一覧する。
-- **必ずこの一覧の中から** 1 手を選ぶ。一覧に無い手は反則になる。
-- 将棋の棋理(駒得・玉の安全・手得・好形)に従って、最善と思う手を考える。
+- **必ずこの一覧の中から** 1 手を選ぶ。将棋の棋理(駒得・玉の安全・手得・好形)に従う。
 - 短いコメント(読み筋や方針)を用意してよい(任意)。
 
 ### D. 自分の手を適用して送信する
 
 - `BOARD apply --player <role> <自分の USI>` で自分の盤面にも適用する。
-- 適用後の status を見て、相手を詰ませた(`checkmate=True`)なら、あなたの勝ち。
-  勝利の言葉を添える。
-- `/agmsg send <相手の role> "<自分の USI> <コメント>"` で相手に送る。
+- 適用後の status で相手を詰ませた(`checkmate=True`)なら、あなたの勝ち。勝利の言葉を添える。
+- `send.sh shogi <role> <opp> "<自分の USI> <コメント>"` で相手に送る。
 
 ### E. 相手の番
 
-- A に戻り、monitor で相手の手が届くのを待つ。
+- A に戻り、`inbox.sh` のポーリングで相手の手を待つ。
 
 ## 終局の扱い
 
@@ -79,5 +84,4 @@
 
 - あなたは対局者である。1 手ずつ丁寧に読み、相手の手の意図も汲む。
 - コメントで棋風や感情を出してよい。これは観賞物でもある。
-- ただし盤面の真実は常に board.py にある。自分の記憶があやしいときは、board.py の
-  出力を信じる。
+- 盤面の真実は常に board.py にある。自分の記憶があやしいときは board.py の出力を信じる。

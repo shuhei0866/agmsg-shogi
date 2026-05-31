@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agmsg-shogi viewer</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
+         background:#1c1c1e; color:#eee; margin:0; padding:24px; }
+  .wrap { max-width: 520px; margin:0 auto; }
+  h1 { font-size:17px; font-weight:600; margin:0 0 4px; }
+  .sub { font-size:12px; color:#888; margin-bottom:14px; }
+  .board { display:grid; grid-template-columns:22px repeat(9,46px);
+           grid-template-rows:22px repeat(9,46px); }
+  .hdr { display:flex; align-items:center; justify-content:center;
+         font-size:11px; color:#888; }
+  .sq { width:46px; height:46px; border:1px solid #6b5733;
+        display:flex; align-items:center; justify-content:center;
+        font-size:24px; background:#dcb877; box-sizing:border-box; }
+  .sq.last { background:#f3d24e; }
+  .sente { color:#161616; }
+  .gote { color:#161616; transform:rotate(180deg); }
+  .hands { font-size:14px; margin:6px 0; min-height:20px; letter-spacing:1px; }
+  .controls { margin:16px 0 6px; display:flex; gap:6px; align-items:center; }
+  button { font-size:15px; padding:5px 12px; background:#333; color:#eee;
+           border:1px solid #555; border-radius:6px; cursor:pointer; }
+  button:hover { background:#444; }
+  input[type=range] { flex:1; }
+  .status { font-size:13px; color:#bbb; margin:8px 0; }
+  .live { font-size:12px; color:#5c5; margin-left:6px; }
+  label { font-size:13px; color:#bbb; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>agmsg-shogi viewer</h1>
+  <div class="sub">2 つの Claude が agmsg で指す対局を、棋譜再生しながら観戦する</div>
+  <div class="hands" id="hands-gote"></div>
+  <div class="board" id="board"></div>
+  <div class="hands" id="hands-sente"></div>
+  <div class="controls">
+    <button onclick="go(0)">⏮</button>
+    <button onclick="step(-1)">◀</button>
+    <button onclick="step(1)">▶</button>
+    <button onclick="go(LAST)">⏭</button>
+    <input type="range" id="slider" min="0" max="0" value="0" oninput="go(+this.value)">
+  </div>
+  <div class="status"><span id="ply">0/0</span> ・ <span id="info"></span><span class="live" id="live"></span></div>
+  <label><input type="checkbox" id="follow" checked> 最新手に追従</label>
+</div>
+<script>
+const PIECE = {P:'歩',L:'香',N:'桂',S:'銀',G:'金',B:'角',R:'飛',K:'玉',
+  '+P':'と','+L':'杏','+N':'圭','+S':'全','+B':'馬','+R':'龍'};
+const KAN = '一二三四五六七八九';
+const player = new URLSearchParams(location.search).get('player') || 'sente';
+let sfens=[], moves=[], cur=0, LAST=0;
+
+function parseBoard(sfen){
+  const rows = sfen.split(' ')[0].split('/');
+  return rows.map(row => {
+    const cells=[]; let i=0;
+    while(i<row.length){
+      const c=row[i];
+      if(c==='+'){ cells.push(row.substr(i,2)); i+=2; }
+      else if(/[0-9]/.test(c)){ for(let k=0;k<+c;k++) cells.push(null); i++; }
+      else { cells.push(c); i++; }
+    }
+    return cells;
+  });
+}
+
+function usiToRC(usi){
+  if(!usi) return null;
+  const to = usi.slice(2,4);
+  const f = +to[0], r = to.charCodeAt(1)-96;
+  if(!(f>=1&&f<=9&&r>=1&&r<=9)) return null;
+  return [r-1, 9-f];
+}
+
+function hdr(t){ const d=document.createElement('div'); d.className='hdr'; d.textContent=t; return d; }
+
+function render(){
+  const grid = parseBoard(sfens[cur]||sfens[0]);
+  const lastRC = cur>0 ? usiToRC(moves[cur-1]) : null;
+  const b = document.getElementById('board');
+  b.innerHTML='';
+  b.appendChild(hdr(''));
+  for(let f=9; f>=1; f--) b.appendChild(hdr(f));
+  for(let r=0;r<9;r++){
+    b.appendChild(hdr(KAN[r]));
+    for(let c=0;c<9;c++){
+      const sq=document.createElement('div'); sq.className='sq';
+      if(lastRC && lastRC[0]===r && lastRC[1]===c) sq.classList.add('last');
+      const cell=grid[r][c];
+      if(cell){
+        const letter = cell.replace('+','');
+        const isGote = letter === letter.toLowerCase();
+        const span=document.createElement('span');
+        span.textContent = PIECE[cell.toUpperCase()] || '?';
+        span.className = isGote ? 'gote' : 'sente';
+        sq.appendChild(span);
+      }
+      b.appendChild(sq);
+    }
+  }
+  renderHands(sfens[cur]||sfens[0]);
+  const turn = cur%2===0 ? '▲先手番' : '△後手番';
+  document.getElementById('ply').textContent = `${cur}/${LAST} 手目`;
+  document.getElementById('info').textContent =
+    (cur<LAST ? '再生中' : turn) + (cur>0 ? ' ・ 直前 '+moves[cur-1] : '');
+  document.getElementById('slider').value = cur;
+}
+
+function renderHands(sfen){
+  const hand = sfen.split(' ')[2] || '-';
+  let sente='', gote='';
+  if(hand!=='-'){
+    let i=0;
+    while(i<hand.length){
+      let n=1, c=hand[i];
+      if(/[0-9]/.test(c)){ n=+c; i++; c=hand[i]; }
+      const s=(PIECE[c.toUpperCase()]||c)+(n>1?n:'');
+      if(c===c.toUpperCase()) sente+=s+' '; else gote+=s+' ';
+      i++;
+    }
+  }
+  document.getElementById('hands-sente').textContent='▲持駒  '+(sente||'なし');
+  document.getElementById('hands-gote').textContent='△持駒  '+(gote||'なし');
+}
+
+function go(i){ cur=Math.max(0,Math.min(LAST,i)); render(); }
+function step(d){ go(cur+d); }
+
+async function poll(){
+  try{
+    const d = await (await fetch('/api/game?player='+player)).json();
+    const wasLast = (cur===LAST);
+    sfens=d.sfens; moves=d.moves; LAST=d.count;
+    document.getElementById('slider').max=LAST;
+    document.getElementById('live').textContent = d.game_over ? '  ◆ 終局' : '  ● live';
+    if(document.getElementById('follow').checked && wasLast) cur=LAST;
+    if(cur>LAST) cur=LAST;
+    render();
+  }catch(e){ document.getElementById('live').textContent='  (接続待ち)'; }
+}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

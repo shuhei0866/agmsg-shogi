@@ -55,6 +55,16 @@ python3 -m venv .venv
 
 # agmsg (shared agent messaging)
 bash <(curl -fsSL https://raw.githubusercontent.com/fujibee/agmsg/main/setup.sh)
+
+# (optional) web viewer + evaluation graph
+.venv/bin/python -m pip install fastapi uvicorn py7zr
+
+# (optional, macOS/Apple Silicon) YaneuraOu engine + Suisho5 eval for the graph
+mkdir -p engine && cd engine
+gh release download V9.00   --repo yaneurao/YaneuraOu --pattern "*mac-all*"
+gh release download suisho5 --repo yaneurao/YaneuraOu --pattern "Suisho5.7z"
+../.venv/bin/python -c "import py7zr,glob; [py7zr.SevenZipFile(f).extractall() for f in glob.glob('*.7z')]"
+cd ..
 ```
 
 ## Run a match
@@ -74,6 +84,23 @@ Sente plays the first move; from there the two agents trade moves over agmsg unt
 checkmate or resignation. Each session joins agmsg team `shogi` under its role name
 and fixes that role with `/agmsg actas <role>` so monitor delivery stays scoped to
 one inbox.
+
+## Watch in a browser (board + evaluation graph)
+
+A small FastAPI server reads the live `state/*.moves` and serves each position as
+SFEN; the frontend renders the board (Japanese pieces, coordinate axes, last-move
+highlight), lets you scrub the game with a slider, and follows the live game. With
+the YaneuraOu engine set up (see Setup), it also plots an **evaluation graph** from
+Black's perspective (above 0 = sente better, below 0 = gote better).
+
+```bash
+cd web && ../.venv/bin/python -m uvicorn server:app --port 8011
+# open http://localhost:8011/?player=sente
+```
+
+The server is read-only — it never writes to the game. Evaluation runs in the
+background and is cached per position, so the page loads immediately and the graph
+fills in as positions are scored. Tune search time via `MOVETIME_MS` in `web/server.py`.
 
 ## `board.py`
 
@@ -103,6 +130,10 @@ players/
   sente.md          first-player kickoff
   gote.md           second-player kickoff
 state/              per-player move lists (gitignored)
+web/
+  server.py         FastAPI: SFEN feed (/api/game) + eval feed (/api/eval, YaneuraOu)
+  index.html        board viewer + Chart.js evaluation graph
+engine/             YaneuraOu binary + Suisho5 eval (gitignored, see Setup)
 ```
 
 ## Demo

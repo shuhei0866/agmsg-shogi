@@ -19,7 +19,9 @@ STATE_DIR = os.path.join(ROOT, "state")
 PIECE_JP = {
     "P": "歩", "L": "香", "N": "桂", "S": "銀", "G": "金",
     "B": "角", "R": "飛", "K": "玉",
+    "+P": "と", "+L": "杏", "+N": "圭", "+S": "全", "+B": "馬", "+R": "龍",
 }
+KANSUJI = "一二三四五六七八九"
 
 
 def moves_path(player):
@@ -62,16 +64,56 @@ def hands_str(board):
     return "\n".join(out)
 
 
+def _usi_to_sq(usi):
+    """USI の指し手から到達マス (square) を求める。打ち・成りも to は usi[2:4]。"""
+    try:
+        to = usi[2:4]
+        f = int(to[0])
+        r = ord(to[1]) - ord("a") + 1
+        if not (1 <= f <= 9 and 1 <= r <= 9):
+            return None
+        return (r - 1) * 9 + (9 - f)
+    except (ValueError, IndexError):
+        return None
+
+
+def _cell(piece):
+    """1 マス分 (3 セル幅)。後手は v、先手は半角空白を駒の前に置く。空マスは ' ・'。"""
+    if piece is None:
+        return " ・"
+    sym = piece.symbol()
+    key = "+" + sym[1].upper() if sym.startswith("+") else sym.upper()
+    jp = PIECE_JP.get(key, "??")
+    return ("v" if piece.color == shogi.WHITE else " ") + jp
+
+
+def render_board(board, last_to_sq=None):
+    """筋・段の座標軸つきで盤面を描く。直前手のマスは反転で強調する (端末のみ)。"""
+    use_color = sys.stdout.isatty()
+    out = ["  ９ ８ ７ ６ ５ ４ ３ ２ １", " +" + "-" * 27 + "+"]
+    for rank_idx in range(9):
+        row = "|"
+        for col in range(9):
+            sq = rank_idx * 9 + col
+            cell = _cell(board.piece_at(sq))
+            if sq == last_to_sq and use_color:
+                cell = "\033[7m" + cell + "\033[0m"  # 直前手のマスを反転 (TTY のみ)
+            row += cell
+        out.append(row + "|" + KANSUJI[rank_idx])
+    out.append(" +" + "-" * 27 + "+")
+    return "\n".join(out)
+
+
 def render(board, last=None):
-    lines = [str(board), hands_str(board)]
-    turn = "先手番(black)" if board.turn == shogi.BLACK else "後手番(white)"
-    lines.append(f"手数: {board.move_number}  手番: {turn}")
+    lines = [render_board(board, _usi_to_sq(last) if last else None), hands_str(board)]
+    turn = "▲ 先手番" if board.turn == shogi.BLACK else "△ 後手番"
+    lines.append(f"手数 {board.move_number} ・ {turn}")
     if last:
-        lines.append(f"直前の手: {last}")
+        lines.append(f"直前の手 {last}")
     if board.is_check():
-        lines.append("** 王手 (CHECK) **")
+        lines.append("** 王手 **")
     if board.is_checkmate():
-        lines.append("** 詰み (CHECKMATE) — 手番側の負け **")
+        lines.append("** 詰み(手番側の負け)**")
     return "\n".join(lines)
 
 

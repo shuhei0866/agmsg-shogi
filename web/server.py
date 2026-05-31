@@ -1,23 +1,33 @@
 #!/usr/bin/env python
 """agmsg-shogi web viewer のバックエンド。
 
-対局本体 (main の working tree) の state/<player>.moves を読み、python-shogi で
-初手から再生して各局面の SFEN リストを配信する。盤面描画はフロント側 (shogiground)
-が SFEN から行う。このサーバーは棋譜を SFEN に変換して渡すだけで、対局には一切
-書き込まない (読み取り専用)。
+対局本体の state/<player>.moves を読み、各局面の SFEN を配信する (/api/game)。
+さらにやねうら王 (USI) を常駐させ、各局面の評価値を先手視点で配信する (/api/eval)。
+評価値は局面 (SFEN) ごとにキャッシュして同じ局面は再評価せず、未評価ぶんは
+バックグラウンドで進める (初回リクエストもブロックしない)。対局には一切書き込まない。
 """
 import os
+import subprocess
+import threading
+from pathlib import Path
 
 import shogi
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
-# 対局が走っているのは main の working tree。worktree からそこの state を読む。
 GAME_ROOT = os.path.expanduser("~/Developer/agmsg-shogi")
 STATE_DIR = os.path.join(GAME_ROOT, "state")
 WEB_DIR = os.path.dirname(os.path.abspath(__file__))
 
+ENGINE_DIR = Path(GAME_ROOT) / "engine"
+ENGINE_BIN = ENGINE_DIR / "NNUE_halfkp_256x2_32_32/YaneuraOu_NNUE_halfkp_256x2_32_32-V900Git_APPLEM1"
+MOVETIME_MS = 250
+
 app = FastAPI()
+
+_engine = None
+_lock = threading.Lock()
+_cache = {}  # sfen -> 先手視点 score (cp)
 
 
 def _read_moves(player):
@@ -28,31 +38,113 @@ def _read_moves(player):
         return [ln.strip() for ln in f if ln.strip()]
 
 
-@app.get("/api/game")
-def game(player: str = "sente"):
-    """棋譜を再生して各局面の SFEN を返す。sfens[0] は初期局面、sfens[i] は i 手目後。"""
-    moves = _read_moves(player)
+def _sfens_for(player):
+    """初期局面 + 各手後の SFEN リストを返す。"""
     board = shogi.Board()
     sfens = [board.sfen()]
-    applied = []
-    for usi in moves:
+    moves = []
+    for usi in _read_moves(player):
         try:
             board.push_usi(usi)
         except Exception:
-            break  # 不正手 / 盤面ずれが起きたらそこで止める
+            break
         sfens.append(board.sfen())
-        applied.append(usi)
-    return JSONResponse(
-        {
-            "player": player,
-            "count": len(applied),
-            "moves": applied,
-            "sfens": sfens,
-            "last": applied[-1] if applied else None,
-            "checkmate": board.is_checkmate(),
-            "game_over": board.is_game_over(),
-        }
+        moves.append(usi)
+    return moves, sfens, board
+
+
+def _engine_send(c):
+    _engine.stdin.write(c + "\n")
+    _engine.stdin.flush()
+
+
+def _engine_wait(token):
+    while True:
+        line = _engine.stdout.readline()
+        if not line or token in line:
+            return
+
+
+def _ensure_engine():
+    global _engine
+    if _engine is not None:
+        return
+    _engine = subprocess.Popen(
+        [str(ENGINE_BIN)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        text=True, cwd=str(ENGINE_DIR), bufsize=1,
     )
+    _engine_send("usi")
+    _engine_wait("usiok")
+    _engine_send("setoption name EvalDir value .")
+    _engine_send("setoption name USI_Hash value 128")
+    _engine_send("isready")
+    _engine_wait("readyok")
+
+
+def _eval_one(moves, ply):
+    """ply 手目の局面を評価し、先手視点の score (cp) を返す。"""
+    pos = "position startpos" + (" moves " + " ".join(moves) if moves else "")
+    _engine_send(pos)
+    _engine_send(f"go movetime {MOVETIME_MS}")
+    score = 0
+    while True:
+        line = _engine.stdout.readline()
+        if not line:
+            break
+        toks = line.split()
+        if "score" in toks:
+            i = toks.index("score")
+            kind = toks[i + 1]
+            if kind == "cp":
+                score = int(toks[i + 2])
+            elif kind == "mate":
+                score = 30000 if not toks[i + 2].lstrip("+").startswith("-") else -30000
+        if line.startswith("bestmove"):
+            break
+    # score は手番側視点。先手視点へ: ply 偶数=先手番→そのまま、奇数=後手番→反転
+    return score if ply % 2 == 0 else -score
+
+
+def _eval_pending(player):
+    """未評価の局面を順に評価してキャッシュに入れる (同時に 1 スレッドのみ)。"""
+    if not _lock.acquire(blocking=False):
+        return
+    try:
+        _ensure_engine()
+        moves, _, _ = _sfens_for(player)
+        board = shogi.Board()
+        prefix = []
+        if board.sfen() not in _cache:
+            _cache[board.sfen()] = _eval_one(prefix, 0)
+        for i, usi in enumerate(moves):
+            board.push_usi(usi)
+            prefix.append(usi)
+            sfen = board.sfen()
+            if sfen not in _cache:
+                _cache[sfen] = _eval_one(prefix, i + 1)
+    finally:
+        _lock.release()
+
+
+@app.get("/api/game")
+def game(player: str = "sente"):
+    moves, sfens, board = _sfens_for(player)
+    return JSONResponse({
+        "player": player, "count": len(moves), "moves": moves,
+        "sfens": sfens, "last": moves[-1] if moves else None,
+        "checkmate": board.is_checkmate(), "game_over": board.is_game_over(),
+    })
+
+
+@app.get("/api/eval")
+def api_eval(player: str = "sente"):
+    """各局面 (初期+各手) の先手視点 score。キャッシュ済みのみ返し、未評価は null。"""
+    moves, sfens, _ = _sfens_for(player)
+    evals = [_cache.get(s) for s in sfens]
+    if any(e is None for e in evals):
+        threading.Thread(target=_eval_pending, args=(player,), daemon=True).start()
+    done = sum(1 for e in evals if e is not None)
+    return JSONResponse({"player": player, "count": len(moves), "evals": evals, "evaluated": done})
 
 
 @app.get("/", response_class=HTMLResponse)

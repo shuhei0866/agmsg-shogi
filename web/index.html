@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agmsg-shogi viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
          background:#1c1c1e; color:#eee; margin:0; padding:24px; }
@@ -21,7 +22,10 @@
   .sente { color:#161616; }
   .gote { color:#161616; transform:rotate(180deg); }
   .hands { font-size:14px; margin:6px 0; min-height:20px; letter-spacing:1px; }
-  .controls { margin:16px 0 6px; display:flex; gap:6px; align-items:center; }
+  .evalbox { height:130px; margin:14px 0 4px; background:#161618;
+             border-radius:6px; padding:8px 10px; }
+  .evalnum { font-size:13px; color:#ccc; margin-bottom:6px; }
+  .controls { margin:14px 0 6px; display:flex; gap:6px; align-items:center; }
   button { font-size:15px; padding:5px 12px; background:#333; color:#eee;
            border:1px solid #555; border-radius:6px; cursor:pointer; }
   button:hover { background:#444; }
@@ -34,10 +38,12 @@
 <body>
 <div class="wrap">
   <h1>agmsg-shogi viewer</h1>
-  <div class="sub">2 つの Claude が agmsg で指す対局を、棋譜再生しながら観戦する</div>
+  <div class="sub">2 つの Claude が agmsg で指す対局を、棋譜再生 + やねうら王の評価値つきで観戦する</div>
   <div class="hands" id="hands-gote"></div>
   <div class="board" id="board"></div>
   <div class="hands" id="hands-sente"></div>
+  <div class="evalnum" id="evalnum">評価値: —</div>
+  <div class="evalbox"><canvas id="evalChart"></canvas></div>
   <div class="controls">
     <button onclick="go(0)">⏮</button>
     <button onclick="step(-1)">◀</button>
@@ -53,7 +59,7 @@ const PIECE = {P:'歩',L:'香',N:'桂',S:'銀',G:'金',B:'角',R:'飛',K:'玉',
   '+P':'と','+L':'杏','+N':'圭','+S':'全','+B':'馬','+R':'龍'};
 const KAN = '一二三四五六七八九';
 const player = new URLSearchParams(location.search).get('player') || 'sente';
-let sfens=[], moves=[], cur=0, LAST=0;
+let sfens=[], moves=[], evals=[], cur=0, LAST=0, chart=null;
 
 function parseBoard(sfen){
   const rows = sfen.split(' ')[0].split('/');
@@ -78,6 +84,23 @@ function usiToRC(usi){
 }
 
 function hdr(t){ const d=document.createElement('div'); d.className='hdr'; d.textContent=t; return d; }
+
+function initChart(){
+  chart = new Chart(document.getElementById('evalChart'), {
+    type:'line',
+    data:{ labels:[], datasets:[{
+      data:[], borderColor:'#6ab4d8', borderWidth:1.5, pointRadius:[],
+      pointBackgroundColor:'#f3d24e', spanGaps:true, tension:0.15,
+      fill:{ target:{value:0}, above:'rgba(90,160,200,.15)', below:'rgba(210,90,90,.15)' }
+    }]},
+    options:{ animation:false, maintainAspectRatio:false,
+      scales:{
+        y:{ suggestedMin:-1500, suggestedMax:1500, ticks:{color:'#888',font:{size:10}},
+            grid:{color:c=>c.tick.value===0?'#777':'#2a2a2c'} },
+        x:{ ticks:{color:'#888',font:{size:10},maxTicksLimit:10}, grid:{display:false} } },
+      plugins:{ legend:{display:false}, tooltip:{enabled:false} } }
+  });
+}
 
 function render(){
   const grid = parseBoard(sfens[cur]||sfens[0]);
@@ -109,6 +132,15 @@ function render(){
   document.getElementById('info').textContent =
     (cur<LAST ? '再生中' : turn) + (cur>0 ? ' ・ 直前 '+moves[cur-1] : '');
   document.getElementById('slider').value = cur;
+  // 評価値テキスト + グラフの現局面マーカー
+  const ev = evals[cur];
+  document.getElementById('evalnum').textContent = (ev==null)
+    ? '評価値: 評価中…'
+    : `評価値: ${ev>=0?'+':''}${ev}  ${Math.abs(ev)<50?'(互角)':(ev>0?'(先手有利)':'(後手有利)')}`;
+  if(chart){
+    chart.data.datasets[0].pointRadius = evals.map((_,i)=>i===cur?5:0);
+    chart.update('none');
+  }
 }
 
 function renderHands(sfen){
@@ -131,7 +163,7 @@ function renderHands(sfen){
 function go(i){ cur=Math.max(0,Math.min(LAST,i)); render(); }
 function step(d){ go(cur+d); }
 
-async function poll(){
+async function pollGame(){
   try{
     const d = await (await fetch('/api/game?player='+player)).json();
     const wasLast = (cur===LAST);
@@ -143,8 +175,25 @@ async function poll(){
     render();
   }catch(e){ document.getElementById('live').textContent='  (接続待ち)'; }
 }
-poll();
-setInterval(poll, 2000);
+
+async function pollEval(){
+  try{
+    const d = await (await fetch('/api/eval?player='+player)).json();
+    evals = d.evals;
+    if(chart){
+      chart.data.labels = evals.map((_,i)=>i);
+      chart.data.datasets[0].data = evals;
+      chart.data.datasets[0].pointRadius = evals.map((_,i)=>i===cur?5:0);
+      chart.update('none');
+    }
+    render();
+  }catch(e){}
+}
+
+initChart();
+pollGame(); pollEval();
+setInterval(pollGame, 2000);
+setInterval(pollEval, 2500);
 </script>
 </body>
 </html>

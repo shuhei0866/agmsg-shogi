@@ -1,9 +1,10 @@
 # agmsg-shogi
 
-Two Claude Code agents playing a game of shogi against each other — autonomously,
-over [agmsg](https://github.com/fujibee/agmsg).
+Two CLI coding agents playing a game of shogi against each other — autonomously,
+over [agmsg](https://github.com/fujibee/agmsg). Either side can be **Claude Code,
+Codex, or Gemini CLI**, so cross-engine matches (e.g. Claude vs Codex) work too.
 
-No human in the loop after kickoff. Each side is a separate Claude Code session;
+No human in the loop after kickoff. Each side is a separate CLI agent session;
 they exchange moves through agmsg's shared SQLite mailbox, while
 [python-shogi](https://github.com/gunyarakun/python-shogi) keeps each board legal.
 It is the shogi cousin of agmsg's tic-tac-toe demo.
@@ -16,7 +17,7 @@ Three layers, cleanly separated:
 |-------|------|---------|
 | `board.py` | Board state, legal-move generation, checkmate detection (python-shogi wrapper) | no |
 | agmsg | Carries USI moves between the two agents (shared SQLite mailbox) | no |
-| Claude Code | Picks the move | **yes** |
+| CLI agent (Claude Code / Codex / Gemini) | Picks the move | **yes** |
 
 The key design choice: **only the USI move travels over agmsg — never the board.**
 Both sides replay the same move sequence through python-shogi deterministically, so
@@ -69,21 +70,25 @@ cd ..
 
 ## Run a match
 
-Open two terminal panes. In each:
+`match.sh` launches both players in separate cmux panes and assigns sente/gote.
+Either side can be **Claude Code, Codex, or Gemini CLI** — the board and protocol
+stay identical, only the player changes:
 
 ```bash
-cd agmsg-shogi && claude
+./match.sh claude codex      # sente: Claude Code,  gote: Codex
+./match.sh gemini claude      # sente: Gemini CLI,   gote: Claude Code
+./match.sh claude claude      # both Claude Code (the original demo)
 ```
 
-Then give each session its role:
+Each engine starts with autonomy enabled (`--dangerously-skip-permissions` /
+`--dangerously-bypass-approvals-and-sandbox` / `--approval-mode yolo`) and an
+initial prompt pointing at `players/<role>.md`. From there the two agents trade
+moves over agmsg (`send.sh`/`inbox.sh`, polled between turns) until checkmate or
+resignation. `match.sh` resets the move lists, so finish any running game first.
 
-- **Pane 1 (sente / first player):** `players/sente.md を読んで対局して`
-- **Pane 2 (gote / second player):** `players/gote.md を読んで対局して`
-
-Sente plays the first move; from there the two agents trade moves over agmsg until
-checkmate or resignation. Each session joins agmsg team `shogi` under its role name
-and fixes that role with `/agmsg actas <role>` so monitor delivery stays scoped to
-one inbox.
+To launch by hand instead, open two panes, start your agent in each
+(`claude` / `codex` / `gemini`), and tell it to read `players/sente.md`
+(or `gote.md`) and play.
 
 ## Watch in a browser (board + evaluation graph)
 
@@ -125,6 +130,7 @@ Run it with the venv python:
 
 ```
 board.py            python-shogi wrapper CLI (board only, no thinking)
+match.sh            cross-engine match launcher (claude/codex/gemini → sente/gote)
 players/
   RULES.md          shared turn-loop spec both players read
   sente.md          first-player kickoff

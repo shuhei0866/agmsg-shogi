@@ -110,14 +110,21 @@ Codex, or Gemini CLI** — the board, engine and protocol stay identical, only t
 player changes:
 
 ```bash
-./match.sh claude codex        # sente: Claude (attacker)  vs  gote: Codex (holder)
-./match.sh gemini claude        # sente: Gemini (attacker)  vs  gote: Claude (holder)
-./match.sh claude claude        # both Claude — same engine shortlist, two styles
-./match.sh claude claude 300    # widen the style margin to 300cp
+./match.sh claude codex          # sente: Claude (attacker)  vs  gote: Codex (holder)
+./match.sh gemini claude          # sente: Gemini (attacker)  vs  gote: Claude (holder)
+./match.sh claude claude          # both Claude — same engine shortlist, two styles
+./match.sh claude claude 300      # widen the style margin to 300cp
+./match.sh claude claude 200 2    # room "2" — runs alongside another game
 ```
 
-The optional third argument is the centipawn margin (default `200`) — see
-**Personas & the margin knob** above.
+The third argument is the centipawn margin (default `200`, see **Personas & the
+margin knob** above). The fourth is an optional **room** name for running games
+**concurrently**: it suffixes the roles (`sente2` / `gote2`), so each game gets its
+own `state/<role>.moves` and its own agmsg mailbox. agmsg routes by `(team, recipient)`,
+so a distinct role name is enough to keep two games on the same `shogi` team from
+crossing wires. Watch the second game at `/?player=sente2` (same server). Without a
+room, a launch resets `sente` / `gote`, so use a room to avoid clobbering a game in
+progress.
 
 Each engine starts with autonomy enabled (`--dangerously-skip-permissions` /
 `--dangerously-bypass-approvals-and-sandbox` / `--approval-mode yolo`) and an

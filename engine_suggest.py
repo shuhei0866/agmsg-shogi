@@ -215,8 +215,9 @@ def render_text(res):
 def main():
     ap = argparse.ArgumentParser(description="現局面でやねうら王に上位手を出させる")
     src = ap.add_mutually_exclusive_group()
-    src.add_argument("--player", choices=["sente", "gote"],
-                     help="state/<player>.moves の現局面を使う")
+    src.add_argument("--player",
+                     help="state/<player>.moves の現局面を使う (役割名。sente / gote のほか "
+                          "room 付きの sente2 / gote2 等も可)")
     src.add_argument("--moves", help="USI 手列を直接渡す (空白区切り、テスト用)")
     ap.add_argument("--multipv", type=int, default=5, help="上位何手まで (既定 5)")
     ap.add_argument("--movetime", type=int, default=800, help="思考時間 ms (既定 800)")

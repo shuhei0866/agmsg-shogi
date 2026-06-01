@@ -71,11 +71,18 @@ WSNAME="shogi: 急戦 $SENTE vs 持久 $GOTE${ROOM:+ (room $ROOM)}"
 WS=$(cmux new-workspace --name "$WSNAME" --cwd "$ROOT" \
        --command "$(launch "$SENTE" "$P_SENTE")" --focus false \
      | grep -oE 'workspace:[0-9]+' | head -1)
-echo "workspace: $WS  (先手=急戦 $SENTE 起動, 役割 $SROLE)"
+SF1=$(cmux list-pane-surfaces --workspace "$WS" | grep -oE 'surface:[0-9]+' | head -1)
+echo "workspace: $WS  (先手=急戦 $SENTE 起動, 役割 $SROLE, surface $SF1)"
 
-# 2 ペイン目 (gote) を split で作り、起動コマンドを送る (ソケット混雑にリトライで耐える)
-cmux new-split right --workspace "$WS" --focus false >/dev/null
-SF2=$(cmux list-pane-surfaces --workspace "$WS" | grep -oE 'surface:[0-9]+' | tail -1)
+# 2 ペイン目 (gote) を split で作る。surface は new-split 自身の出力 ("OK surface:N
+# workspace:M") から取る。list-pane-surfaces は split 直後の 2 ペイン目を出さないことが
+# あり、それを誤ると後手の起動コマンドが先手ペインに送られて両者が同居してしまう。
+SF2=$(cmux new-split right --workspace "$WS" --focus false 2>/dev/null | grep -oE 'surface:[0-9]+' | head -1)
+if [ -z "$SF2" ]; then
+  echo "warning: 後手ペインの surface を取得できませんでした (new-split の出力なし)" >&2
+  exit 1
+fi
+# 起動コマンドを送る (ソケット混雑にリトライで耐える)
 for _ in 1 2 3 4 5; do
   cmux send --workspace "$WS" --surface "$SF2" "cd $ROOT && $(launch "$GOTE" "$P_GOTE")" 2>/dev/null && break || true
 done

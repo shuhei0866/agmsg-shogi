@@ -21,6 +21,7 @@
   .sq.last { background:#f3d24e; }
   .sente { color:#161616; }
   .gote { color:#161616; transform:rotate(180deg); }
+  .promoted { color:#cc2b1d; font-weight:700; }
   .hands { font-size:14px; margin:6px 0; min-height:20px; letter-spacing:1px; }
   .evalbox { height:130px; margin:14px 0 4px; background:#161618;
              border-radius:6px; padding:8px 10px; }
@@ -58,6 +59,7 @@
 const PIECE = {P:'歩',L:'香',N:'桂',S:'銀',G:'金',B:'角',R:'飛',K:'玉',
   '+P':'と','+L':'杏','+N':'圭','+S':'全','+B':'馬','+R':'龍'};
 const KAN = '一二三四五六七八九';
+const ZEN = '１２３４５６７８９';
 const player = new URLSearchParams(location.search).get('player') || 'sente';
 let sfens=[], moves=[], evals=[], cur=0, LAST=0, chart=null;
 
@@ -81,6 +83,16 @@ function usiToRC(usi){
   const f = +to[0], r = to.charCodeAt(1)-96;
   if(!(f>=1&&f<=9&&r>=1&&r<=9)) return null;
   return [r-1, 9-f];
+}
+
+function usiToJa(prevSfen, usi, moveIdx){
+  if(!usi) return '';
+  const mark = moveIdx%2===0 ? '▲' : '△';
+  const dest = ZEN[+usi[2]-1] + KAN[usi.charCodeAt(3)-97];
+  if(usi[1]==='*') return mark+dest+(PIECE[usi[0]]||usi[0])+'打';
+  const cell = parseBoard(prevSfen)[usi.charCodeAt(1)-97][9-+usi[0]];
+  const name = cell ? (PIECE[cell.toUpperCase()]||'?') : '?';
+  return mark+dest+name+(usi.endsWith('+')?'成':'');
 }
 
 function hdr(t){ const d=document.createElement('div'); d.className='hdr'; d.textContent=t; return d; }
@@ -120,7 +132,7 @@ function render(){
         const isGote = letter === letter.toLowerCase();
         const span=document.createElement('span');
         span.textContent = PIECE[cell.toUpperCase()] || '?';
-        span.className = isGote ? 'gote' : 'sente';
+        span.className = (isGote ? 'gote' : 'sente') + (cell[0]==='+' ? ' promoted' : '');
         sq.appendChild(span);
       }
       b.appendChild(sq);
@@ -130,7 +142,8 @@ function render(){
   const turn = cur%2===0 ? '▲先手番' : '△後手番';
   document.getElementById('ply').textContent = `${cur}/${LAST} 手目`;
   document.getElementById('info').textContent =
-    (cur<LAST ? '再生中' : turn) + (cur>0 ? ' ・ 直前 '+moves[cur-1] : '');
+    (cur<LAST ? '再生中' : turn) +
+    (cur>0 ? ' ・ 直前 '+usiToJa(sfens[cur-1], moves[cur-1], cur-1)+' ('+moves[cur-1]+')' : '');
   document.getElementById('slider').value = cur;
   // 評価値テキスト + グラフの現局面マーカー
   const ev = evals[cur];

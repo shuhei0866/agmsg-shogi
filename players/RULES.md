@@ -15,9 +15,13 @@
 
 ## 前提
 
-- あなたの役割(先手 sente / 後手 gote)・相手・エージェント種別は、起動時に読む
-  `sente.md` か `gote.md` で指定される。以下、自分を `<role>`、相手を `<opp>`、
-  自分のエージェント種別(claude-code / codex / gemini)を `<type>` と書く。
+- あなたの役割(先手 sente / 後手 gote)・対局 ID・エージェント種別は、起動時に環境変数
+  (`AGMSG_ROLE` / `AGMSG_GAME` / `AGMSG_TYPE`) で渡される(単独起動なら `sente.md` か
+  `gote.md` を読む)。以下、自分を `<role>`(sente か gote)と書く。相手の宛先・team・自分の
+  name は下記 `gmsg.sh` が環境変数から決めるので、自分で組み立てない。
+- **この対局では Monitor を起動しない**。SessionStart で inbox stream の起動を促されても
+  従わないこと。並行する別対局のメッセージまで拾って混線するため。相手の手は下記 A の
+  `gmsg.sh inbox` ポーリングで受ける。
 - 盤面エンジン。どのディレクトリからでも動く。以下これを `BOARD` と呼ぶ:
 
   ```
@@ -39,13 +43,15 @@
   選択候補(帯内 ✓)にするか」。手の選び方は C を見る。`BOARD` と同じく state を読むので、
   両者は常に同じ現局面を見ている。
 
-- agmsg は次のスクリプトを直接叩く(team 名は `shogi`)。`/agmsg` や `$agmsg` の
-  スキルは使わない(エージェントによって有無が違うため):
+- agmsg は agmsg-shogi の `gmsg.sh` ラッパー経由で叩く。team・自分の name・相手の宛先は
+  すべて環境変数(`AGMSG_GAME` / `AGMSG_ROLE`)から `gmsg.sh` が決めるので、自分では指定
+  しない(これで並行対局どうしの取り違えを防ぐ)。`/agmsg` や `$agmsg` のスキルは使わない
+  (エージェントによって有無が違うため):
 
   ```
-  join : ~/.agents/skills/agmsg/scripts/join.sh shogi <role> <type> ~/Developer/agmsg-shogi
-  送信 : ~/.agents/skills/agmsg/scripts/send.sh  shogi <role> <opp> "<メッセージ>"
-  受信 : ~/.agents/skills/agmsg/scripts/inbox.sh shogi <role>
+  参加 : ~/Developer/agmsg-shogi/gmsg.sh join
+  送信 : ~/Developer/agmsg-shogi/gmsg.sh send "<メッセージ>"
+  受信 : ~/Developer/agmsg-shogi/gmsg.sh inbox
   ```
 
 ## 通信フォーマット
@@ -62,8 +68,8 @@
 
 ### A. 相手の手を受け取る(先手の初手だけはこの A を飛ばす)
 
-- `inbox.sh shogi <role>` を実行して相手のメッセージを読む。
-- まだ届いていなければ(空なら)数秒おきに `inbox.sh` を繰り返し、相手の手が来るまで待つ。
+- `gmsg.sh inbox` を実行して相手のメッセージを読む。
+- まだ届いていなければ(空なら)数秒おきに `gmsg.sh inbox` を繰り返し、相手の手が来るまで待つ。
 - 届いたメッセージの先頭トークンを相手の USI として、盤面に適用する:
   `BOARD apply --player <role> <相手の USI>`
 - `ILLEGAL` が返ったら、相手が反則したか盤面がずれている。相手に伝えて対局を止め、
@@ -73,7 +79,7 @@
 
 - `BOARD show --player <role>` で盤面、`BOARD status --player <role>` で手番・王手・詰み。
 - `checkmate=True` で**手番が自分**なら詰まされている。投了する:
-  `send.sh shogi <role> <opp> "投了 — お見事でした"` を送り、対局を終えて報告する。
+  `gmsg.sh send "投了 — お見事でした"` を送り、対局を終えて報告する。
 
 ### C. 自分の手を選ぶ(エンジンの上位手から棋風で選ぶ)
 
@@ -100,11 +106,11 @@
 - もし `ILLEGAL` が返ったら(`SUGGEST` の手は合法手なので通常は起きないが)、C に戻って
   帯内 ✓ の別の手を選び直す。
 - 適用後の status で相手を詰ませた(`checkmate=True`)なら、あなたの勝ち。勝利の言葉を添える。
-- `send.sh shogi <role> <opp> "<自分の USI> <コメント>"` で相手に送る。
+- `gmsg.sh send "<自分の USI> <コメント>"` で相手に送る。
 
 ### E. 相手の番
 
-- A に戻り、`inbox.sh` のポーリングで相手の手を待つ。
+- A に戻り、`gmsg.sh inbox` のポーリングで相手の手を待つ。
 
 ## 終局の扱い
 

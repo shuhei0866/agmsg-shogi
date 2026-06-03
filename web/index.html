@@ -34,6 +34,16 @@
   .status { font-size:13px; color:#bbb; margin:8px 0; }
   .live { font-size:12px; color:#5c5; margin-left:6px; }
   label { font-size:13px; color:#bbb; }
+  h2 { font-size:14px; font-weight:600; margin:20px 0 8px; color:#ddd; }
+  .ksub { font-size:12px; color:#888; margin-bottom:8px; }
+  .kx { background:#161618; border:1px solid #2a2a2c; border-radius:6px;
+        padding:8px 10px; margin:6px 0; cursor:pointer; }
+  .kx:hover { border-color:#555; }
+  .kx.active { border-color:#e8923a; background:#1f1a13; }
+  .kxh { font-size:11px; color:#9c9; margin-bottom:4px; }
+  .kl { font-size:13px; line-height:1.55; margin:3px 0; }
+  .kl b { color:#bbb; font-weight:600; margin-right:5px; font-size:12px; }
+  .kmk { color:#e8923a; margin-right:1px; }
 </style>
 </head>
 <body>
@@ -54,6 +64,7 @@
   </div>
   <div class="status"><span id="ply">0/0</span> ・ <span id="info"></span><span class="live" id="live"></span></div>
   <label><input type="checkbox" id="follow" checked> 最新手に追従</label>
+  <div id="kansen"></div>
 </div>
 <script>
 const PIECE = {P:'歩',L:'香',N:'桂',S:'銀',G:'金',B:'角',R:'飛',K:'玉',
@@ -62,8 +73,18 @@ const KAN = '一二三四五六七八九';
 const ZEN = '１２３４５６７８９';
 const player = new URLSearchParams(location.search).get('player') || 'sente';
 const game = new URLSearchParams(location.search).get('game') || '';
+const reviewSrc = new URLSearchParams(location.search).get('review') || '';
 const Q = 'player='+encodeURIComponent(player)+'&game='+encodeURIComponent(game);
 let sfens=[], moves=[], evals=[], cur=0, LAST=0, chart=null;
+let review=null, tpByMove={};
+
+// グラフの点: 現局面=黄(大)、転換点(感想戦の議題)=橙、その他=非表示
+function ptStyle(){
+  return {
+    r: evals.map((_,i)=> i===cur ? 6 : (tpByMove[i] ? 4 : 0)),
+    c: evals.map((_,i)=> i===cur ? '#f3d24e' : (tpByMove[i] ? '#e8923a' : '#f3d24e')),
+  };
+}
 
 function parseBoard(sfen){
   const rows = sfen.split(' ')[0].split('/');
@@ -153,9 +174,19 @@ function render(){
     ? '評価値: 評価中…'
     : `評価値: ${ev>=0?'+':''}${ev}  ${Math.abs(ev)<50?'(互角)':(ev>0?'(先手有利)':'(後手有利)')}`;
   if(chart){
-    chart.data.datasets[0].pointRadius = evals.map((_,i)=>i===cur?5:0);
+    const ps = ptStyle();
+    chart.data.datasets[0].pointRadius = ps.r;
+    chart.data.datasets[0].pointBackgroundColor = ps.c;
     chart.update('none');
   }
+  highlightKansen();
+}
+
+// 現局面が転換点なら、感想戦パネルの該当ブロックを強調して見える位置へ送る
+function highlightKansen(){
+  document.querySelectorAll('.kx.active').forEach(e=>e.classList.remove('active'));
+  const el = document.getElementById('kx'+cur);
+  if(el){ el.classList.add('active'); el.scrollIntoView({block:'nearest'}); }
 }
 
 function renderHands(sfen){
@@ -198,17 +229,63 @@ async function pollEval(){
     if(chart){
       chart.data.labels = evals.map((_,i)=>i);
       chart.data.datasets[0].data = evals;
-      chart.data.datasets[0].pointRadius = evals.map((_,i)=>i===cur?5:0);
+      const ps = ptStyle();
+      chart.data.datasets[0].pointRadius = ps.r;
+      chart.data.datasets[0].pointBackgroundColor = ps.c;
       chart.update('none');
     }
     render();
   }catch(e){}
 }
 
+function sgn(v){ return (v>=0?'+':'')+v; }
+function kline(mk,who,txt){
+  return '<div class="kl"><span class="kmk">'+mk+'</span><b>'+(who||'')+'</b>'+(txt||'')+'</div>';
+}
+
+function renderKansen(){
+  if(!review) return;
+  const sp = review.sente_persona||'先手', gp = review.gote_persona||'後手';
+  let h = '<h2>感想戦 — ▲'+sp+'（先手） vs △'+gp+'（後手）</h2>'
+        + '<div class="ksub">転換点をクリックするとその局面へ飛びます。グラフの橙点が議題です。</div>';
+  if(review.opening){
+    h += '<div class="kx" onclick="go(0)"><div class="kxh">対局を終えて</div>'
+       + kline('▲',sp,review.opening.sente) + kline('△',gp,review.opening.gote) + '</div>';
+  }
+  (review.exchanges||[]).forEach(ex=>{
+    h += '<div class="kx" id="kx'+ex.move_no+'" onclick="go('+ex.move_no+')">'
+       + '<div class="kxh">'+ex.move_no+'手目 '+ex.ja+' ・ 評価 '
+       + sgn(ex.eval_before_black)+'→'+sgn(ex.eval_after_black)+'cp'
+       + (ex.best_ja?' ・ 正着 '+ex.best_ja:'') + '</div>';
+    (ex.lines||[]).forEach(ln=> h += kline(ln.speaker==='sente'?'▲':'△', ln.persona, ln.text));
+    h += '</div>';
+  });
+  if(review.closing){
+    h += '<div class="kx"><div class="kxh">締め</div>'
+       + kline('▲',sp,review.closing.sente) + kline('△',gp,review.closing.gote) + '</div>';
+  }
+  document.getElementById('kansen').innerHTML = h;
+}
+
+async function loadReview(){
+  try{
+    const url = reviewSrc ? '/api/review?src='+encodeURIComponent(reviewSrc)
+                          : '/api/review?game='+encodeURIComponent(game);
+    const d = await (await fetch(url)).json();
+    if(!d || !d.available || !((d.exchanges||[]).length)) return false;
+    review = d; tpByMove = {};
+    (d.exchanges||[]).forEach(ex=> tpByMove[ex.move_no]=ex);
+    renderKansen(); render();
+    return true;
+  }catch(e){ return false; }
+}
+
 initChart();
 pollGame(); pollEval();
 setInterval(pollGame, 2000);
 setInterval(pollEval, 2500);
+// 感想戦は終局後に生成される。取得できるまで数秒おきに試し、取れたら止める。
+loadReview().then(ok=>{ if(!ok){ const t=setInterval(async()=>{ if(await loadReview()) clearInterval(t); }, 5000); } });
 </script>
 </body>
 </html>

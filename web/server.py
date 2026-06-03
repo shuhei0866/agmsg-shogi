@@ -6,6 +6,7 @@
 評価値は局面 (SFEN) ごとにキャッシュして同じ局面は再評価せず、未評価ぶんは
 バックグラウンドで進める (初回リクエストもブロックしない)。対局には一切書き込まない。
 """
+import json
 import os
 import subprocess
 import threading
@@ -154,6 +155,24 @@ def api_eval(player: str = "sente", game: str = ""):
         threading.Thread(target=_eval_pending, args=(player, game), daemon=True).start()
     done = sum(1 for e in evals if e is not None)
     return JSONResponse({"player": player, "count": len(moves), "evals": evals, "evaluated": done})
+
+
+@app.get("/api/review")
+def api_review(game: str = "", src: str = ""):
+    """対局の感想戦 (kansousen.py の出力) を返す。?game=<id> なら state/<id>/kansousen.json、
+    ?src=<相対パス> ならアーカイブ等の任意の kansousen.json (GAME_ROOT 配下のみ)。"""
+    if src:
+        path = os.path.normpath(os.path.join(GAME_ROOT, src))
+        if not path.startswith(GAME_ROOT):   # パストラバーサル防止
+            return JSONResponse({"available": False, "exchanges": []})
+    else:
+        path = os.path.join(_state_dir(game), "kansousen.json")
+    if not os.path.exists(path):
+        return JSONResponse({"available": False, "exchanges": []})
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["available"] = True
+    return JSONResponse(data)
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -14,7 +14,10 @@ import sys
 import shogi
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-STATE_DIR = os.path.join(ROOT, "state")
+# 並行対局の分離: AGMSG_GAME があれば state/<game>/ に閉じる。役割名を取り違えても
+# 自分の対局ディレクトリの外には書き込めない。未設定なら従来の state/ で後方互換。
+_GAME = os.environ.get("AGMSG_GAME", "").strip()
+STATE_DIR = os.path.join(ROOT, "state", _GAME) if _GAME else os.path.join(ROOT, "state")
 
 PIECE_JP = {
     "P": "歩", "L": "香", "N": "桂", "S": "銀", "G": "金",

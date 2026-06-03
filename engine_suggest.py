@@ -32,7 +32,9 @@ import shogi
 # web/server.py と同じ絶対パス。どの worktree / どの cwd から呼ばれても
 # メインツリーの engine/ ・ state/ を解決する。
 GAME_ROOT = Path(os.path.expanduser("~/Developer/agmsg-shogi"))
-STATE_DIR = GAME_ROOT / "state"
+# board.py と同じく AGMSG_GAME で対局ごとに state を分ける。未設定なら従来の state/。
+_GAME = os.environ.get("AGMSG_GAME", "").strip()
+STATE_DIR = (GAME_ROOT / "state" / _GAME) if _GAME else (GAME_ROOT / "state")
 ENGINE_DIR = GAME_ROOT / "engine"
 ENGINE_BIN = ENGINE_DIR / "NNUE_halfkp_256x2_32_32/YaneuraOu_NNUE_halfkp_256x2_32_32-V900Git_APPLEM1"
 

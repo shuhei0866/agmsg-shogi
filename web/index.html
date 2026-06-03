@@ -61,6 +61,8 @@ const PIECE = {P:'歩',L:'香',N:'桂',S:'銀',G:'金',B:'角',R:'飛',K:'玉',
 const KAN = '一二三四五六七八九';
 const ZEN = '１２３４５６７８９';
 const player = new URLSearchParams(location.search).get('player') || 'sente';
+const game = new URLSearchParams(location.search).get('game') || '';
+const Q = 'player='+encodeURIComponent(player)+'&game='+encodeURIComponent(game);
 let sfens=[], moves=[], evals=[], cur=0, LAST=0, chart=null;
 
 function parseBoard(sfen){
@@ -178,7 +180,7 @@ function step(d){ go(cur+d); }
 
 async function pollGame(){
   try{
-    const d = await (await fetch('/api/game?player='+player)).json();
+    const d = await (await fetch('/api/game?'+Q)).json();
     const wasLast = (cur===LAST);
     sfens=d.sfens; moves=d.moves; LAST=d.count;
     document.getElementById('slider').max=LAST;
@@ -191,7 +193,7 @@ async function pollGame(){
 
 async function pollEval(){
   try{
-    const d = await (await fetch('/api/eval?player='+player)).json();
+    const d = await (await fetch('/api/eval?'+Q)).json();
     evals = d.evals;
     if(chart){
       chart.data.labels = evals.map((_,i)=>i);

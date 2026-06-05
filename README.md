@@ -187,6 +187,26 @@ will own its characteristic blind spot — the rapid-attacker confessing it "kep
 watching its own attack and walked the king into trouble," with the engine's better
 move shown right beside it.
 
+## Playing out the mate (指し継ぎ)
+
+Games end in **resignation**, so the board is never actually checkmated — the loser
+gives up once the position is clearly lost. `mate_line.py` plays the game out from the
+resignation position: YaneuraOu moves **both sides at best play** (the winner converts,
+the loser resists as long as possible) until real checkmate, and writes the whole thing
+— actual game **plus** the finishing sequence — as one move list.
+
+```bash
+.venv/bin/python mate_line.py --game <game>   # → state/<game>/mate.moves (+ mate_line.md)
+# watch the resignation play out to mate:
+#   http://localhost:8011/?player=mate&game=<game>
+```
+
+It reuses the SFEN replay convention, so the viewer shows it like any game — you scrub
+straight from the real moves into the mate that never happened on the board. `review.sh`
+runs this as its last step, so every post-game review leaves both the kansōsen and the
+played-out mate. (`go mate` is avoided — this build ignores its time limit; the line is
+found with plain `go movetime` self-play.)
+
 ## `board.py`
 
 A thin python-shogi CLI — it manages the board and never thinks. State lives in
@@ -213,8 +233,9 @@ board.py              python-shogi wrapper CLI (board only, no thinking)
 engine_suggest.py     YaneuraOu MultiPV → top-N moves + eval + PV (move strength)
 review_points.py      終局譜 → turning-point agenda (eval swings + engine truth + banter)
 kansousen.py          感想戦 driver: walks the agenda, voices each side via claude -p
+mate_line.py          plays the resignation position out to real checkmate (both sides best)
 match.sh              match launcher (claude/codex/gemini → attacker/holder roles)
-review.sh             one-command post-game review (review_points → kansousen)
+review.sh             one-command post-game review (review_points → kansousen → mate_line)
 players/
   RULES.md            shared turn-loop spec both players read
   sente.md            first-player (attacker) kickoff

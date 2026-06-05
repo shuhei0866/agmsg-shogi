@@ -28,17 +28,22 @@ MODEL="${5:-claude-haiku-4-5-20251001}"
 OUT="$ROOT/state/${GAME}"
 mkdir -p "$OUT"
 
-echo "[1/2] 転換点を抽出中 (やねうら王)…"
+echo "[1/3] 転換点を抽出中 (やねうら王)…"
 AGMSG_GAME="$GAME" "$PY" "$ROOT/review_points.py" \
   --game "$GAME" --sente-name "sente${GAME}" --gote-name "gote${GAME}" \
   -k "$K" --json > "$OUT/agenda.json"
 
-echo "[2/2] 感想戦を生成中 (persona の声)…"
+echo "[2/3] 感想戦を生成中 (persona の声)…"
 "$PY" "$ROOT/kansousen.py" \
   --agenda "$OUT/agenda.json" --sente-persona "$SP" --gote-persona "$GP" \
   -k "$K" --model "$MODEL" \
   --out-md "$OUT/kansousen.md" --out-json "$OUT/kansousen.json"
 
+echo "[3/3] 投了局面から詰みまで指し継ぎ中 (やねうら王)…"
+"$PY" "$ROOT/mate_line.py" --game "$GAME" --out "$OUT/mate.moves"
+
 echo
-echo "感想戦: $OUT/kansousen.md"
-echo "観戦:   http://localhost:8011/?player=sente&game=$GAME"
+echo "感想戦:       $OUT/kansousen.md"
+echo "指し継ぎ:     $OUT/mate.moves  (投了 → 詰み)"
+echo "観戦:         http://localhost:8011/?player=sente&game=$GAME"
+echo "指し継ぎ観戦: http://localhost:8011/?player=mate&game=$GAME"

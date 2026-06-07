@@ -77,6 +77,7 @@ const reviewSrc = new URLSearchParams(location.search).get('review') || '';
 const Q = 'player='+encodeURIComponent(player)+'&game='+encodeURIComponent(game);
 let sfens=[], moves=[], evals=[], cur=0, LAST=0, chart=null;
 let review=null, tpByMove={};
+let resignAt=null;   // 指し継ぎ (mate_line) の投了手数。実戦と寄せの境目
 
 // グラフの点: 現局面=黄(大)、転換点(感想戦の議題)=橙、その他=非表示
 function ptStyle(){
@@ -85,6 +86,23 @@ function ptStyle(){
     c: evals.map((_,i)=> i===cur ? '#f3d24e' : (tpByMove[i] ? '#e8923a' : '#f3d24e')),
   };
 }
+
+// 指し継ぎの場合、投了手数に破線の縦線 (ここから先が投了後の寄せ) を引く
+const boundaryPlugin = {
+  id: 'boundary',
+  afterDraw(chart){
+    if(resignAt==null) return;
+    const x = chart.scales.x.getPixelForValue(resignAt);
+    const {top, bottom} = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = '#e8923a'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.fillStyle = '#e8923a'; ctx.font = '10px sans-serif'; ctx.setLineDash([]);
+    ctx.fillText('投了', x + 3, top + 10);
+    ctx.restore();
+  }
+};
 
 function parseBoard(sfen){
   const rows = sfen.split(' ')[0].split('/');
@@ -123,6 +141,7 @@ function hdr(t){ const d=document.createElement('div'); d.className='hdr'; d.tex
 function initChart(){
   chart = new Chart(document.getElementById('evalChart'), {
     type:'line',
+    plugins:[boundaryPlugin],
     data:{ labels:[], datasets:[{
       data:[], borderColor:'#6ab4d8', borderWidth:1.5, pointRadius:[],
       pointBackgroundColor:'#f3d24e', spanGaps:true, tension:0.15,
@@ -163,8 +182,14 @@ function render(){
   }
   renderHands(sfens[cur]||sfens[0]);
   const turn = cur%2===0 ? '▲先手番' : '△後手番';
+  let phase = '';
+  if(resignAt!=null){
+    if(cur < resignAt) phase = '実戦 ・ ';
+    else if(cur === resignAt) phase = '投了局面 ・ ';
+    else phase = '指し継ぎ '+(cur-resignAt)+'手 ・ ';
+  }
   document.getElementById('ply').textContent = `${cur}/${LAST} 手目`;
-  document.getElementById('info').textContent =
+  document.getElementById('info').textContent = phase +
     (cur<LAST ? '再生中' : turn) +
     (cur>0 ? ' ・ 直前 '+usiToJa(sfens[cur-1], moves[cur-1], cur-1)+' ('+moves[cur-1]+')' : '');
   document.getElementById('slider').value = cur;
@@ -214,6 +239,7 @@ async function pollGame(){
     const d = await (await fetch('/api/game?'+Q)).json();
     const wasLast = (cur===LAST);
     sfens=d.sfens; moves=d.moves; LAST=d.count;
+    resignAt = (d.resign_at!=null) ? d.resign_at : null;
     document.getElementById('slider').max=LAST;
     document.getElementById('live').textContent = d.game_over ? '  ◆ 終局' : '  ● live';
     if(document.getElementById('follow').checked && wasLast) cur=LAST;

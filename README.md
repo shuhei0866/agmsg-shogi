@@ -202,10 +202,13 @@ the loser resists as long as possible) until real checkmate, and writes the whol
 ```
 
 It reuses the SFEN replay convention, so the viewer shows it like any game — you scrub
-straight from the real moves into the mate that never happened on the board. `review.sh`
-runs this as its last step, so every post-game review leaves both the kansōsen and the
-played-out mate. (`go mate` is avoided — this build ignores its time limit; the line is
-found with plain `go movetime` self-play.)
+straight from the real moves into the mate that never happened on the board. A sidecar
+records where the real game ended, so the viewer draws a dashed **投了 (resignation)**
+line on the eval graph and the status reads 「指し継ぎ N手」 once you pass it — you watch
+the eval fall off the cliff the loser resigned into. `review.sh` runs this as its last
+step, so every post-game review leaves both the kansōsen and the played-out mate.
+(`go mate` is avoided — this build ignores its time limit; the line is found with plain
+`go movetime` self-play.)
 
 ## `board.py`
 

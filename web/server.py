@@ -139,11 +139,23 @@ def _eval_pending(player, game=""):
 @app.get("/api/game")
 def api_game(player: str = "sente", game: str = ""):
     moves, sfens, board = _sfens_for(player, game)
-    return JSONResponse({
+    resp = {
         "player": player, "game": (game or DEFAULT_GAME), "count": len(moves), "moves": moves,
         "sfens": sfens, "last": moves[-1] if moves else None,
         "checkmate": board.is_checkmate(), "game_over": board.is_game_over(),
-    })
+    }
+    # 指し継ぎ (mate_line) の sidecar があれば、実戦と寄せの境目を伝える
+    side = os.path.join(_state_dir(game), f"{player}.json")
+    if os.path.exists(side):
+        try:
+            with open(side, encoding="utf-8") as f:
+                meta = json.load(f)
+            if "src_len" in meta:
+                resp["resign_at"] = meta["src_len"]
+                resp["mate_line"] = True
+        except Exception:
+            pass
+    return JSONResponse(resp)
 
 
 @app.get("/api/eval")
